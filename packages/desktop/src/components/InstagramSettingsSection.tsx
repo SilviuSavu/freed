@@ -183,6 +183,7 @@ export function InstagramSettingsSection({
     hideLoginCommand: "ig_hide_login",
     providerLabel: "Instagram",
     isAuthenticated: () => useAppStore.getState().igAuth.isAuthenticated,
+    checkAuth: checkIgAuth,
     onAuthResult: handleAuthResult,
     runSync,
   });

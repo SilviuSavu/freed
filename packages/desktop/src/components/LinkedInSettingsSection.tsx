@@ -164,6 +164,7 @@ export function LinkedInSettingsSection({
     hideLoginCommand: "li_hide_login",
     providerLabel: "LinkedIn",
     isAuthenticated: () => useAppStore.getState().liAuth.isAuthenticated,
+    checkAuth: checkLiAuth,
     onAuthResult: handleAuthResult,
     runSync,
   });
