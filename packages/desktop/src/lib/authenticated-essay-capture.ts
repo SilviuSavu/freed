@@ -251,6 +251,13 @@ async function fetchAuthenticatedEssayData<Entry, Profile>(
         `[${providerPrefix(config.provider)}] extraction pass: candidates=${(payload.candidateCount ?? 0).toLocaleString()}, entries=${entries.length.toLocaleString()}, profiles=${profiles.length.toLocaleString()}${payload.done ? " final" : ""}`,
       );
 
+      if (payload.error) {
+        addDebugEvent(
+          "error",
+          `[${providerPrefix(config.provider)}] page extraction error at ${payload.url ?? "unknown url"}: ${payload.error}`,
+        );
+      }
+
       if (payload.error && !diag.errorStage) {
         diag.errorStage = /auth|sign.?in|log.?in/i.test(payload.error) ? "auth" : "extract";
         diag.errorMessage = payload.error;

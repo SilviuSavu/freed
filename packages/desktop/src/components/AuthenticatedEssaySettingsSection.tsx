@@ -111,6 +111,7 @@ function AuthenticatedEssaySettingsSection({
     hideLoginCommand: config.hideLoginCommand,
     providerLabel: copy.label,
     isAuthenticated: () => config.getAuth().isAuthenticated,
+    checkAuth: config.checkAuth,
     onAuthResult: handleAuthResult,
     runSync,
   });

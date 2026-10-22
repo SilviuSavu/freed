@@ -18,6 +18,7 @@ interface UsePostLoginAutoSyncOptions {
   providerLabel: string;
   isAuthenticated: () => boolean;
   onAuthResult: (loggedIn: boolean) => void;
+  checkAuth: () => Promise<boolean>;
   runSync: (trigger?: "post_login") => Promise<void>;
 }
 
@@ -41,6 +42,7 @@ export function usePostLoginAutoSync({
   providerLabel,
   isAuthenticated,
   onAuthResult,
+  checkAuth,
   runSync,
 }: UsePostLoginAutoSyncOptions): PostLoginAutoSyncState {
   const [status, setStatus] = useState<PostLoginSyncState>("idle");
@@ -51,6 +53,11 @@ export function usePostLoginAutoSync({
   const runSyncRef = useRef(runSync);
   const isAuthenticatedRef = useRef(isAuthenticated);
   const onAuthResultRef = useRef(onAuthResult);
+  const checkAuthRef = useRef(checkAuth);
+
+  useEffect(() => {
+    checkAuthRef.current = checkAuth;
+  }, [checkAuth]);
 
   useEffect(() => {
     runSyncRef.current = runSync;
@@ -153,6 +160,21 @@ export function usePostLoginAutoSync({
       if (!isDesktopProviderAuthAllowed()) return;
       if (!event.payload.closed) return;
       cancel();
+      // A login window can be recycled mid-check (for example by a memory
+      // preflight) before the auth result event arrives. When that happens,
+      // re-check the session once instead of leaving the provider stuck as
+      // not authenticated even though the browser session exists.
+      if (isAuthenticatedRef.current()) return;
+      window.setTimeout(() => {
+        if (!isDesktopProviderAuthAllowed()) return;
+        if (isAuthenticatedRef.current()) return;
+        checkAuthRef.current().then((loggedIn) => {
+          if (!isDesktopProviderAuthAllowed()) return;
+          if (!loggedIn || isAuthenticatedRef.current()) return;
+          onAuthResultRef.current(true);
+          void runSyncRef.current("post_login").catch(() => {});
+        }).catch(() => {});
+      }, 2_000);
     });
     return () => {
       unlisten.then((fn) => fn());
