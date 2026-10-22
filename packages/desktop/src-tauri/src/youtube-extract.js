@@ -444,6 +444,52 @@
     "reelItemRenderer",
   ]);
 
+  // YouTube serves the subscriptions grid with lockup view models on newer
+  // clients. Convert them to the classic renderer shape the collector reads.
+  function lockupToRenderer(value) {
+    if (!value || typeof value !== "object") return null;
+    const contentId = typeof value.contentId === "string" ? value.contentId : "";
+    if (!/^[a-zA-Z0-9_-]{11}$/.test(contentId)) return null;
+    const metadata = value.metadata && value.metadata.lockupMetadataViewModel;
+    const titleContent =
+      metadata && metadata.title && typeof metadata.title.content === "string"
+        ? metadata.title.content
+        : "";
+    const sources =
+      value.contentImage &&
+      value.contentImage.thumbnailViewModel &&
+      value.contentImage.thumbnailViewModel.image &&
+      Array.isArray(value.contentImage.thumbnailViewModel.image.sources)
+        ? value.contentImage.thumbnailViewModel.image.sources
+        : [];
+    const rows =
+      metadata &&
+      metadata.metadata &&
+      Array.isArray(metadata.metadata.metadataRows)
+        ? metadata.metadata.metadataRows
+        : [];
+    let ownerText = "";
+    for (const row of rows) {
+      const parts = Array.isArray(row.metadataParts) ? row.metadataParts : [];
+      for (const part of parts) {
+        const candidate = part && part.text && part.text.content;
+        if (typeof candidate === "string" && candidate.trim()) {
+          ownerText = ownerText || candidate;
+        }
+      }
+    }
+    return {
+      videoId: contentId,
+      title: titleContent ? { runs: [{ text: titleContent }] } : undefined,
+      thumbnail: {
+        thumbnails: sources
+          .map(function (source) { return source && typeof source.url === "string" ? { url: source.url } : null; })
+          .filter(Boolean),
+      },
+      ownerText: ownerText ? { runs: [{ text: ownerText }] } : undefined,
+    };
+  }
+
   function emptyCollectionStats() {
     return {
       channelCandidates: 0,
@@ -551,6 +597,15 @@
           stats.videoCandidates += 1;
           if (addVideo(child, childSource, trackUnresolved, issueTarget)) {
             stats.videoResolved += 1;
+          }
+        }
+        if (stage === "subscriptions" && key === "lockupViewModel") {
+          const lockupRenderer = lockupToRenderer(child);
+          if (lockupRenderer) {
+            stats.videoCandidates += 1;
+            if (addVideo(lockupRenderer, `${childSource}.lockup`, trackUnresolved, issueTarget)) {
+              stats.videoResolved += 1;
+            }
           }
         }
         pending.push({ value: child, path: childSource });
