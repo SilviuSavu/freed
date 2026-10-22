@@ -27,6 +27,10 @@ import { storeIgAuthState } from "./instagram-auth";
 import { attachScraperMediaDiagListener } from "./scraper-media-diag";
 import { getProviderPause, recordProviderHealthEvent } from "./provider-health";
 import {
+  loadSocialProviderCookieState,
+  socialProviderMissingAuthCookieMessage,
+} from "./social-auth-cookie-state";
+import {
   recordScrapeOutcome,
   type SocialScrapeTrigger,
 } from "./runtime-health-events";
@@ -240,6 +244,13 @@ async function fetchIgFeedInternal(
     return { items: [], diag };
   }
 
+  const igCookieState = await loadSocialProviderCookieState("instagram");
+  if (igCookieState && igCookieState.available && !igCookieState.hasAuthCookie) {
+    diag.errorStage = "auth";
+    diag.errorMessage = socialProviderMissingAuthCookieMessage("instagram");
+    return { items: [], diag };
+  }
+
   const memoryPrep = await prepareSocialScrapeMemory(
     "instagram",
     "feed scrape",
@@ -316,6 +327,8 @@ async function fetchIgFeedInternal(
 
       if (error) {
         addDebugEvent("error", `[IG] extraction error: ${error}`);
+        diag.errorStage = pageState?.loginChrome === true ? "auth" : "extract";
+        diag.errorMessage = error;
         return;
       }
 
@@ -382,11 +395,23 @@ async function fetchIgFeedInternal(
   }
 
   if (allRawPosts.length === 0) {
+    if (diag.lastPageState?.loginChrome === true) {
+      diag.errorStage = "auth";
+      diag.errorMessage =
+        "Instagram rendered a login page instead of the feed. Reconnect Instagram and try again.";
+      return { items: [], diag };
+    }
     diag.errorStage = "extract_empty";
     diag.errorMessage = formatInstagramEmptySyncMessage(diag);
     return { items: [], diag };
   }
 
+  // A per-pass extraction error no longer fails the sync once later passes
+  // deliver posts; keep the original success semantics.
+  if (diag.errorStage === "extract" || diag.errorStage === "auth") {
+    diag.errorStage = null;
+    diag.errorMessage = null;
+  }
   try {
     const normalized = igPostsToFeedItems(allRawPosts);
     diag.itemsNormalized = normalized.length;
@@ -518,6 +543,7 @@ async function captureIgFeedInternal(
         store.setError(result.diag.errorMessage ?? result.diag.errorStage);
         const errState = {
           ...useAppStore.getState().igAuth,
+          ...(result.diag.errorStage === "auth" ? { isAuthenticated: false } : null),
           lastCaptureError:
             result.diag.errorMessage ?? result.diag.errorStage ?? "Sync failed",
         };

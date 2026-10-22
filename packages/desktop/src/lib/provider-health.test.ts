@@ -1159,4 +1159,85 @@ describe("provider health", () => {
     expect(provider?.currentMessage).toBe(expected);
     expect(provider?.latestAttempts[0]?.reason).toContain("487586 ms");
   });
+
+  it("auto-pauses repeated auth failures without a prior healthy sync", async () => {
+    vi.useFakeTimers();
+    const now = new Date("2026-04-02T19:15:00.000Z");
+    vi.setSystemTime(now);
+
+    const { mod, toastInfo, storeState } = await loadProviderHealthModule();
+
+    await mod.recordProviderHealthEvent({
+      provider: "linkedin",
+      outcome: "error",
+      stage: "auth",
+      reason: "LinkedIn is not connected in the local WebView session. Reconnect LinkedIn and try again.",
+      finishedAt: now.getTime() - 30 * 60 * 1000,
+    });
+
+    expect(mod.getProviderPause("linkedin")).toBeNull();
+
+    await mod.recordProviderHealthEvent({
+      provider: "linkedin",
+      outcome: "error",
+      stage: "auth",
+      reason: "LinkedIn rendered a login page instead of the feed. Reconnect LinkedIn and try again.",
+      finishedAt: now.getTime(),
+    });
+
+    const pause = mod.getProviderPause("linkedin");
+    expect(pause?.pauseReason).toBe(
+      "Repeated sign-in failures. Reconnect the provider to resume sync.",
+    );
+    expect(storeState.liAuth.pausedUntil).toBe(pause?.pausedUntil);
+    expect(toastInfo).toHaveBeenCalledTimes(1);
+  });
+
+  it("counts extract_empty stages toward the rate-limit pause", async () => {
+    vi.useFakeTimers();
+    const now = new Date("2026-04-02T19:15:00.000Z");
+    vi.setSystemTime(now);
+
+    const { mod } = await loadProviderHealthModule();
+
+    await mod.recordProviderHealthEvent({
+      provider: "instagram",
+      outcome: "success",
+      finishedAt: now.getTime() - 3 * 24 * 60 * 60 * 1000,
+      itemsSeen: 5,
+      itemsAdded: 3,
+    });
+
+    for (let i = 3; i > 0; i -= 1) {
+      await mod.recordProviderHealthEvent({
+        provider: "instagram",
+        outcome: "error",
+        stage: "extract_empty",
+        reason: "Instagram returned no posts",
+        finishedAt: now.getTime() - i * 30 * 60 * 1000,
+      });
+    }
+
+    const pause = mod.getProviderPause("instagram");
+    expect(pause?.pauseReason).toBe("Repeated failures suggest rate limiting");
+  });
+
+  it("does not pause a legitimate empty sync without repeated failures", async () => {
+    vi.useFakeTimers();
+    const now = new Date("2026-04-02T19:15:00.000Z");
+    vi.setSystemTime(now);
+
+    const { mod, toastInfo } = await loadProviderHealthModule();
+
+    await mod.recordProviderHealthEvent({
+      provider: "instagram",
+      outcome: "error",
+      stage: "extract_empty",
+      reason: "Instagram returned no posts",
+      finishedAt: now.getTime(),
+    });
+
+    expect(mod.getProviderPause("instagram")).toBeNull();
+    expect(toastInfo).not.toHaveBeenCalled();
+  });
 });

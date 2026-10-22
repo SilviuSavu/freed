@@ -21,6 +21,10 @@ import { getLiScraperWindowMode } from "./scraper-prefs";
 import { attachScraperMediaDiagListener } from "./scraper-media-diag";
 import { storeLiAuthState } from "./li-auth";
 import { getProviderPause, recordProviderHealthEvent } from "./provider-health";
+import {
+  loadSocialProviderCookieState,
+  socialProviderMissingAuthCookieMessage,
+} from "./social-auth-cookie-state";
 import { recordScrapeOutcome, type SocialScrapeTrigger } from "./runtime-health-events";
 import {
   formatScrapeMemoryPressureDetails,
@@ -195,6 +199,13 @@ async function fetchLiFeedInternal(
     return { items: [], diag };
   }
 
+  const liCookieState = await loadSocialProviderCookieState("linkedin");
+  if (liCookieState && liCookieState.available && !liCookieState.hasAuthCookie) {
+    diag.errorStage = "auth";
+    diag.errorMessage = socialProviderMissingAuthCookieMessage("linkedin");
+    return { items: [], diag };
+  }
+
   const memoryPrep = await prepareSocialScrapeMemory("linkedin", "feed scrape");
   if (!memoryPrep.mayProceed) {
     diag.errorStage = "memory_pressure";
@@ -242,7 +253,7 @@ async function fetchLiFeedInternal(
         );
 
         if (error) {
-          diag.errorStage = "extract";
+          diag.errorStage = pageState?.loginChrome === true ? "auth" : "extract";
           diag.errorMessage = error;
           return;
         }
@@ -311,6 +322,12 @@ async function fetchLiFeedInternal(
   }
 
   if (allRawPosts.length === 0) {
+    if (diag.lastPageState?.loginChrome === true) {
+      diag.errorStage = "auth";
+      diag.errorMessage =
+        "LinkedIn rendered a login page instead of the feed. Reconnect LinkedIn and try again.";
+      return { items: [], diag };
+    }
     diag.errorStage = "empty";
     diag.errorMessage = formatLiEmptyMessage(diag);
     return { items: [], diag };
@@ -457,6 +474,7 @@ async function captureLiFeedInternal(
         store.setError(result.diag.errorMessage ?? result.diag.errorStage);
         const errState = {
           ...useAppStore.getState().liAuth,
+          ...(result.diag.errorStage === "auth" ? { isAuthenticated: false } : null),
           lastCaptureError: result.diag.errorMessage ?? result.diag.errorStage ?? "Sync failed",
         };
         store.setLiAuth(errState);

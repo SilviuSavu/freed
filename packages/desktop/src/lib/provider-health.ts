@@ -1366,7 +1366,24 @@ function recentFailuresForHeuristic(
   return attempts.filter((attempt) => {
     if (bucketSuccess(attempt.outcome)) return false;
     if (now - attempt.finishedAt > RATE_LIMIT_HEURISTIC_WINDOW_MS) return false;
-    return attempt.stage === "timeout" || attempt.stage === "extract" || attempt.stage === "empty";
+    return (
+      attempt.stage === "timeout"
+      || attempt.stage === "extract"
+      || attempt.stage === "empty"
+      || attempt.stage === "extract_empty"
+      || attempt.stage === "extract_silent"
+    );
+  }).length;
+}
+
+function recentAuthFailures(
+  attempts: ProviderHealthAttempt[],
+  now: number,
+): number {
+  return attempts.filter((attempt) => {
+    if (bucketSuccess(attempt.outcome)) return false;
+    if (now - attempt.finishedAt > RATE_LIMIT_HEURISTIC_WINDOW_MS) return false;
+    return attempt.stage === "auth";
   }).length;
 }
 
@@ -1877,6 +1894,11 @@ function maybeAutoPause(
   let pauseReason: string | null = null;
   if (attempt.outcome === "provider_rate_limit") {
     pauseReason = attempt.reason ?? "Rate limit detected";
+  } else if (
+    attempt.stage === "auth" &&
+    recentAuthFailures(providerState.latestAttempts, attempt.finishedAt) >= 2
+  ) {
+    pauseReason = "Repeated sign-in failures. Reconnect the provider to resume sync.";
   } else if (
     (attempt.outcome === "error" || attempt.outcome === "empty") &&
     hadHealthySyncInLast7Days(providerState.latestAttempts, attempt.finishedAt) &&
