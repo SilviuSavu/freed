@@ -367,6 +367,7 @@ export function FacebookSettingsSection({
     hideLoginCommand: "fb_hide_login",
     providerLabel: "Facebook",
     isAuthenticated: () => useAppStore.getState().fbAuth.isAuthenticated,
+    checkAuth: checkFbAuth,
     onAuthResult: handleAuthResult,
     runSync,
   });
